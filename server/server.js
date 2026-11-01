@@ -1,4 +1,6 @@
 
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
 const express = require("express");
 const cors = require("cors");
 const crypto = require("crypto");
@@ -8,10 +10,23 @@ require("dotenv").config();
 const { GoogleGenAI } = require("@google/genai");
 
 const app = express();
+app.use(helmet());
 const PORT = process.env.PORT || 5000;
 
-app.use(cors());
-app.use(express.json());
+// Security: Restrict frontend access
+app.use(
+  cors({
+    origin: process.env.CLIENT_URL || "http://localhost:5173",
+  })
+);
+
+// Security: Limit request body size
+app.use(express.json({ limit: "10kb" }));
+
+// Validate Gemini API key
+if (!process.env.GEMINI_API_KEY) {
+  throw new Error("GEMINI_API_KEY is missing from the .env file.");
+}
 
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
@@ -33,31 +48,25 @@ const mysterySchema = new mongoose.Schema(
     title: String,
     description: String,
     difficulty: String,
-
     suspects: Array,
     clues: Array,
     hints: [String],
-
     solution: {
       culprit: String,
       explanation: String,
     },
-
     discoveredClues: {
       type: [String],
       default: [],
     },
-
     hintsUsed: {
       type: Number,
       default: 0,
     },
-
     accused: {
       type: Boolean,
       default: false,
     },
-
     result: {
       type: mongoose.Schema.Types.Mixed,
       default: null,
@@ -68,16 +77,14 @@ const mysterySchema = new mongoose.Schema(
 
 const MysteryCase = mongoose.model("MysteryCase", mysterySchema);
 
-console.log(
-  "Gemini API key loaded:",
-  process.env.GEMINI_API_KEY ? "YES" : "NO"
-);
-
 // Home route
 app.get("/", (req, res) => {
   res.json({
     message: "AI Mystery Room backend is running!",
-    database: mongoose.connection.readyState === 1 ? "Connected" : "Disconnected",
+    database:
+      mongoose.connection.readyState === 1
+        ? "Connected"
+        : "Disconnected",
   });
 });
 
@@ -102,11 +109,19 @@ app.get("/api/test-gemini", async (req, res) => {
     });
   }
 });
-
+const generateMysteryLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  limit: 5, // Maximum 5 requests
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: {
+    error: "Too many mystery requests. Please try again later.",
+  },
+});
 // Generate a new mystery
-app.post("/api/mysteries", async (req, res) => {
+app.post("/api/mysteries",generateMysteryLimiter,async (req, res) => {
   try {
-    const difficulty = req.body.difficulty || "Easy";
+    const difficulty = req.body?.difficulty || "Easy";
 
     if (!settings[difficulty]) {
       return res.status(400).json({
@@ -170,7 +185,10 @@ Rules:
       }),
       new Promise((_, reject) =>
         setTimeout(
-          () => reject(new Error("Gemini request timed out after 60 seconds")),
+          () =>
+            reject(
+              new Error("Gemini request timed out after 60 seconds")
+            ),
           60000
         )
       ),
@@ -194,10 +212,12 @@ Rules:
         (suspect) => suspect.name === mystery.solution.culprit
       ) ||
       mystery.suspects.some(
-        (suspect) => !suspect.name || !suspect.role || !suspect.statement
+        (suspect) =>
+          !suspect.name || !suspect.role || !suspect.statement
       ) ||
       mystery.clues.some(
-        (clue) => !clue.id || !clue.description || !clue.revelation
+        (clue) =>
+          !clue.id || !clue.description || !clue.revelation
       )
     ) {
       throw new Error("Gemini returned an invalid mystery structure.");
@@ -218,7 +238,8 @@ Rules:
     });
 
     // Never expose solution or unrevealed hints
-    const { solution, hints: privateHints, ...publicMystery } = mystery;
+    const { solution, hints: privateHints, ...publicMystery } =
+      mystery;
 
     console.log("Mystery saved in MongoDB:", caseId);
 
@@ -232,10 +253,11 @@ Rules:
     console.error("Mystery generation failed:", error.message);
 
     res.status(500).json({
-      error: "Could not generate mystery. " + error.message,
+      error: "Could not generate mystery. Please try again later.",
     });
   }
-});
+}
+);
 
 // Retrieve a mystery
 app.get("/api/mysteries/:caseId", async (req, res) => {
@@ -365,7 +387,7 @@ app.post("/api/mysteries/:caseId/accuse", async (req, res) => {
       });
     }
 
-    const selectedSuspect = req.body.suspectName;
+    const selectedSuspect = req.body?.suspectName;
 
     if (
       typeof selectedSuspect !== "string" ||
