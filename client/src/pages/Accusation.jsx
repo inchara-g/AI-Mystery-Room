@@ -9,8 +9,7 @@ function Accusation() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const API_URL = "http://localhost:5000";
-
+ const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
   if (!mystery) {
     return (
       <div className="min-h-screen bg-[#080b14] p-8 text-center text-white">
