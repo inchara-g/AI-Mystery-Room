@@ -14,12 +14,18 @@ app.use(helmet());
 const PORT = process.env.PORT || 5000;
 
 // Security: Restrict frontend access
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://ai-mystery-room-inchara-g.vercel.app",
+];
+
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || "http://localhost:5173",
+    origin: allowedOrigins,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
-
 // Security: Limit request body size
 app.use(express.json({ limit: "10kb" }));
 
